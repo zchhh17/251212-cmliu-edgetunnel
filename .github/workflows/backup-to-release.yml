@@ -19,15 +19,12 @@ jobs:
         run: |
           TS=$(date +"%Y%m%d-%H%M%S")
           echo "TS=$TS" >> $GITHUB_ENV
-          tar -czf src-$TS.tar.gz .
-          sha256sum src-$TS.tar.gz > src-$TS.tar.gz.sha256
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: backup-${{ env.TS }}
-          name: backup-${{ env.TS }}
-          files: |
-            src-${{ env.TS }}.tar.gz
-            src-${{ env.TS }}.tar.gz.sha256
+          mkdir -p /tmp/backup
+          tar -czf /tmp/backup/src-$TS.tar.gz \
+          --exclude=.git \
+          .
+
+          sha256sum /tmp/backup/src-$TS.tar.gz > /tmp/backup/src-$TS.tar.gz.sha256
+
+          mv /tmp/backup/* .
