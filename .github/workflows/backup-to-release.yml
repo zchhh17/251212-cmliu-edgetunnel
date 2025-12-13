@@ -1,0 +1,33 @@
+name: Backup Repo to Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'   # UTC 2 点（北京时间 10 点）
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pack source
+        run: |
+          TS=$(date +"%Y%m%d-%H%M%S")
+          echo "TS=$TS" >> $GITHUB_ENV
+          tar -czf src-$TS.tar.gz .
+          sha256sum src-$TS.tar.gz > src-$TS.tar.gz.sha256
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ env.TS }}
+          name: backup-${{ env.TS }}
+          files: |
+            src-${{ env.TS }}.tar.gz
+            src-${{ env.TS }}.tar.gz.sha256
