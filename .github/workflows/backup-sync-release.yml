@@ -1,0 +1,86 @@
+name: Sync Upstream and Backup to Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"   # UTC 2点（北京时间 10 点）
+
+permissions:
+  contents: write
+
+jobs:
+  sync-backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/cmliu/edgetunnel.git || true
+          git fetch upstream
+
+      - name: Sync upstream main
+        run: |
+          git checkout main
+          git merge upstream/main --no-edit || true
+
+      - name: Check if upstream updated
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          LOCAL_SHA=$(git rev-parse HEAD)
+
+          echo "upstream=$UPSTREAM_SHA"
+          echo "local=$LOCAL_SHA"
+
+          if [ "$UPSTREAM_SHA" = "$LOCAL_SHA" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push changes
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git push origin main
+
+      - name: Pack source
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          TS=$(date +"%Y%m%d-%H%M%S")
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          echo "TS=$TS" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+          mkdir -p /tmp/backup
+          tar -czf /tmp/backup/src-$TS-$SHORT_SHA.tar.gz --exclude=.git .
+          sha256sum /tmp/backup/src-$TS-$SHORT_SHA.tar.gz > /tmp/backup/src-$TS-$SHORT_SHA.tar.gz.sha256
+
+          mv /tmp/backup/* .
+
+      - name: Create Release and upload assets
+        if: steps.check.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ env.TS }}-${{ env.SHORT_SHA }}
+          name: backup-${{ env.TS }}-${{ env.SHORT_SHA }}
+          body: |
+            Automated upstream sync backup
+
+            - Upstream: cmliu/edgetunnel
+            - Commit: ${{ env.SHORT_SHA }}
+            - Time: ${{ env.TS }}
+
+          files: |
+            src-${{ env.TS }}-${{ env.SHORT_SHA }}.tar.gz
+            src-${{ env.TS }}-${{ env.SHORT_SHA }}.tar.gz.sha256
