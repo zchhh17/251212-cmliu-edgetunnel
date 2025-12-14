@@ -1,0 +1,53 @@
+name: Smart Backup to Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get commit info
+        run: |
+          COMMIT=$(git rev-parse HEAD)
+          SHORT=$(git rev-parse --short HEAD)
+          echo "COMMIT=$COMMIT" >> $GITHUB_ENV
+          echo "SHORT=$SHORT" >> $GITHUB_ENV
+
+      - name: Check if already backed up
+        run: |
+          if gh release list | grep "$COMMIT"; then
+            echo "SKIP=1" >> $GITHUB_ENV
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack source
+        if: env.SKIP != '1'
+        run: |
+          TS=$(date +"%Y%m%d-%H%M%S")
+          echo "TS=$TS" >> $GITHUB_ENV
+
+          mkdir -p /tmp/backup
+          tar -czf /tmp/backup/src-$TS-${{ env.SHORT }}.tar.gz --exclude=.git .
+          sha256sum /tmp/backup/src-$TS-${{ env.SHORT }}.tar.gz > /tmp/backup/src-$TS-${{ env.SHORT }}.tar.gz.sha256
+          mv /tmp/backup/* .
+
+      - name: Create Release
+        if: env.SKIP != '1'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ env.TS }}-${{ env.SHORT }}
+          name: backup-${{ env.TS }}-${{ env.SHORT }}
+          body: Source commit ${{ env.COMMIT }}
+          files: |
+            src-${{ env.TS }}-${{ env.SHORT }}.tar.gz
+            src-${{ env.TS }}-${{ env.SHORT }}.tar.gz.sha256
