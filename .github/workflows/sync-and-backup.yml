@@ -1,0 +1,80 @@
+name: Sync Upstream & Backup to Release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'   # UTC 2点（北京时间10点）
+
+permissions:
+  contents: write   # 必须，否则 403
+
+jobs:
+  sync-backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/cmliu/edgetunnel.git || true
+          git fetch upstream
+
+      - name: Merge upstream/main
+        id: merge
+        run: |
+          git checkout main
+          git merge upstream/main --no-edit || true
+
+          if git diff --quiet HEAD^ HEAD; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push changes if any
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          git push origin main
+
+      # ===== ③ 只有有更新才继续 =====
+      - name: Stop if no changes
+        if: steps.merge.outputs.changed == 'false'
+        run: |
+          echo "No upstream changes, skip backup."
+          exit 0
+
+      # ===== ② 优化 Release 命名 =====
+      - name: Pack source
+        run: |
+          TS=$(date +"%Y%m%d-%H%M%S")
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          echo "TS=$TS" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+          mkdir -p /tmp/backup
+          tar -czf /tmp/backup/src-$TS-$SHORT_SHA.tar.gz --exclude=.git .
+          sha256sum /tmp/backup/src-$TS-$SHORT_SHA.tar.gz > /tmp/backup/src-$TS-$SHORT_SHA.tar.gz.sha256
+
+          mv /tmp/backup/* .
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: backup-${{ env.TS }}-${{ env.SHORT_SHA }}
+          name: backup-${{ env.TS }}-${{ env.SHORT_SHA }}
+          body: |
+            🔄 Synced from upstream: cmliu/edgetunnel
+            🔖 Commit: ${{ env.SHORT_SHA }}
+          files: |
+            src-${{ env.TS }}-${{ env.SHORT_SHA }}.tar.gz
+            src-${{ env.TS }}-${{ env.SHORT_SHA }}.tar.gz.sha256
